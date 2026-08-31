@@ -1,0 +1,90 @@
+name: Test Query Result
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  execute-query:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Executar Query do Azure DevOps
+        shell: bash
+        env:
+          AZDO_PAT: ${{ secrets.AZDO_PAT }}
+
+        run: |
+          set -euo pipefail
+
+          QUERY_ID="133e1671-7720-4c9b-ae84-e96eedeb96ee"
+
+          HTTP_STATUS=$(curl \
+            --silent \
+            --show-error \
+            --location \
+            --output query.json \
+            --write-out "%{http_code}" \
+            --user ":${AZDO_PAT}" \
+            --header "Accept: application/json" \
+            "https://dev.azure.com/promob-dev/Promob/_apis/wit/wiql/${QUERY_ID}?api-version=7.1")
+
+          echo "Status HTTP recebido: ${HTTP_STATUS}"
+
+          if [ "${HTTP_STATUS}" != "200" ]; then
+            echo "Falha na execução da query."
+            cat query.json
+            exit 1
+          fi
+
+          python << 'PY'
+          import json
+
+          with open("query.json", encoding="utf-8") as file:
+              data = json.load(file)
+
+          work_items = data.get("workItems", [])
+          relations = data.get("workItemRelations", [])
+
+          if relations:
+              ids = sorted({
+                  item["target"]["id"]
+                  for item in relations
+                  if item.get("target")
+                  and item["target"].get("id")
+              })
+
+              print()
+              print("✅ Query Tree executada com sucesso")
+              print(f"Quantidade de Work Items: {len(ids)}")
+              print()
+
+              print("Primeiros IDs encontrados:")
+              for item_id in ids[:25]:
+                  print(item_id)
+
+          else:
+              ids = sorted({
+                  item["id"]
+                  for item in work_items
+                  if item.get("id")
+              })
+
+              print()
+              print("✅ Query Flat executada com sucesso")
+              print(f"Quantidade de Work Items: {len(ids)}")
+              print()
+
+              print("Primeiros IDs encontrados:")
+              for item_id in ids[:25]:
+                  print(item_id)
+          PY
+
+      - name: Salvar resposta
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: query-result
+          path: query.json
