@@ -1,70 +1,32 @@
-name: Testar conexão com Azure DevOps
+name: Listar Queries Azure DevOps
 
 on:
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
-  test-query:
+  list-queries:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Consultar query do Azure DevOps
+      - name: Listar queries
         shell: bash
         env:
           AZDO_PAT: ${{ secrets.AZDO_PAT }}
-          AZDO_ORGANIZATION: promob-dev
-          AZDO_PROJECT: Promob
-          AZDO_QUERY_ID: 6bf1ea69-5864-4481-816e-f5d98f03b5e2
 
         run: |
-          set -euo pipefail
-
-          HTTP_STATUS=$(curl \
+          curl \
             --silent \
             --show-error \
-            --location \
-            --output query-result.json \
-            --write-out "%{http_code}" \
             --user ":${AZDO_PAT}" \
             --header "Accept: application/json" \
-            "https://dev.azure.com/${AZDO_ORGANIZATION}/${AZDO_PROJECT}/_apis/wit/queries/${AZDO_QUERY_ID}?api-version=7.1")
-
-          echo "Status HTTP recebido: ${HTTP_STATUS}"
-
-          if [ "${HTTP_STATUS}" != "200" ]; then
-            echo "Falha ao consultar a query."
-            cat query-result.json
-            exit 1
-          fi
+            "https://dev.azure.com/promob-dev/Promob/_apis/wit/queries?\$depth=3&api-version=7.1" \
+            > queries.json
 
           python << 'PY'
           import json
 
-          with open("query-result.json", encoding="utf-8") as f:
+          with open("queries.json", encoding="utf-8") as f:
               data = json.load(f)
 
-          print("\n✅ Conexão com Azure DevOps realizada com sucesso\n")
-
-          print("Nome da Query:")
-          print(data.get("name"))
-
-          print("\nTipo:")
-          print(data.get("queryType"))
-
-          print("\nID:")
-          print(data.get("id"))
-
-          print("\nPasta:")
-          print(data.get("path"))
+          print(json.dumps(data, indent=2))
           PY
-
-      - name: Upload do resultado
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: azure-devops-query-result
-          path: query-result.json
-          if-no-files-found: ignore
