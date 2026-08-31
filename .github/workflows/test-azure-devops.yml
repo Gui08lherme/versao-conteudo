@@ -22,17 +22,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          HTTP_STATUS=$(curl \
-            --silent \
-            --show-error \
-            --location \
-            --output query-result.json \
-            --write-out "%{http_code}" \
-            --user ":${AZDO_PAT}" \
-            --request POST \
-            --header "Accept: application/json" \
-            --header "Content-Type: application/json" \
-            "https://dev.azure.com/${AZDO_ORGANIZATION}/${AZDO_PROJECT}/_apis/wit/wiql/${AZDO_QUERY_ID}?api-version=7.1")
+         HTTP_STATUS=$(curl \
+          --silent \
+          --show-error \
+          --location \
+          --output query-result.json \
+          --write-out "%{http_code}" \
+          --user ":${AZDO_PAT}" \
+          --header "Accept: application/json" \
+          "https://dev.azure.com/${AZDO_ORGANIZATION}/${AZDO_PROJECT}/_apis/wit/queries/${AZDO_QUERY_ID}?api-version=7.1")
 
           echo "Status HTTP recebido: ${HTTP_STATUS}"
 
