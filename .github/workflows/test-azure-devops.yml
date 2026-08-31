@@ -12,73 +12,59 @@ jobs:
 
     steps:
       - name: Consultar query do Azure DevOps
-        id: query
         shell: bash
         env:
           AZDO_PAT: ${{ secrets.AZDO_PAT }}
           AZDO_ORGANIZATION: promob-dev
           AZDO_PROJECT: Promob
           AZDO_QUERY_ID: 6bf1ea69-5864-4481-816e-f5d98f03b5e2
+
         run: |
           set -euo pipefail
 
-         HTTP_STATUS=$(curl \
-          --silent \
-          --show-error \
-          --location \
-          --output query-result.json \
-          --write-out "%{http_code}" \
-          --user ":${AZDO_PAT}" \
-          --header "Accept: application/json" \
-          "https://dev.azure.com/${AZDO_ORGANIZATION}/${AZDO_PROJECT}/_apis/wit/queries/${AZDO_QUERY_ID}?api-version=7.1")
+          HTTP_STATUS=$(curl \
+            --silent \
+            --show-error \
+            --location \
+            --output query-result.json \
+            --write-out "%{http_code}" \
+            --user ":${AZDO_PAT}" \
+            --header "Accept: application/json" \
+            "https://dev.azure.com/${AZDO_ORGANIZATION}/${AZDO_PROJECT}/_apis/wit/queries/${AZDO_QUERY_ID}?api-version=7.1")
 
           echo "Status HTTP recebido: ${HTTP_STATUS}"
 
           if [ "${HTTP_STATUS}" != "200" ]; then
-            echo "A consulta ao Azure DevOps falhou."
+            echo "Falha ao consultar a query."
             cat query-result.json
             exit 1
           fi
 
-          python - <<'PY'
+          python << 'PY'
           import json
 
-          with open("query-result.json", encoding="utf-8") as file:
-              result = json.load(file)
+          with open("query-result.json", encoding="utf-8") as f:
+              data = json.load(f)
 
-          work_items = result.get("workItems", [])
-          relations = result.get("workItemRelations", [])
+          print("\n✅ Conexão com Azure DevOps realizada com sucesso\n")
 
-          if relations:
-              ids = {
-                  relation["target"]["id"]
-                  for relation in relations
-                  if relation.get("target") and relation["target"].get("id")
-              }
-              query_type = "árvore de Work Items"
-          else:
-              ids = {
-                  item["id"]
-                  for item in work_items
-                  if item.get("id")
-              }
-              query_type = "lista de Work Items"
+          print("Nome da Query:")
+          print(data.get("name"))
 
-          print("Conexão com o Azure DevOps realizada com sucesso.")
-          print(f"Tipo de resultado: {query_type}")
-          print(f"Quantidade de IDs únicos retornados: {len(ids)}")
+          print("\nTipo:")
+          print(data.get("queryType"))
 
-          if not ids:
-              raise SystemExit(
-                  "A query foi executada, mas nenhum Work Item foi retornado."
-              )
+          print("\nID:")
+          print(data.get("id"))
+
+          print("\nPasta:")
+          print(data.get("path"))
           PY
 
-      - name: Disponibilizar resposta para diagnóstico
+      - name: Upload do resultado
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: azure-devops-query-result
           path: query-result.json
           if-no-files-found: ignore
-          retention-days: 3
