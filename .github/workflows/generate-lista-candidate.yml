@@ -1,49 +1,293 @@
-name: Gerar LISTA candidata
+name: Atualizar LISTA.xlsx
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: update-lista-xlsx
+  cancel-in-progress: false
 
 jobs:
-  generate-excel:
+  update-excel:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     env:
       AZDO_ORGANIZATION: promob-dev
       AZDO_PROJECT: Promob
       AZDO_QUERY_ID: 133e1671-7720-4c9b-ae84-e96eedeb96ee
-      OUTPUT_FILE: LISTA-CANDIDATE.xlsx
+      OUTPUT_FILE: LISTA.xlsx
+      TARGET_BRANCH: main
 
     steps:
       - name: Baixar conteúdo do repositório
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
 
       - name: Instalar dependências
+        shell: bash
         run: |
+          set -euo pipefail
+
           python -m pip install --upgrade pip
-          pip install requests openpyxl
+          python -m pip install requests openpyxl
+
+      - name: Sincronizar com a versão mais recente da branch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch origin "${TARGET_BRANCH}"
+          git checkout "${TARGET_BRANCH}"
+          git reset --hard "origin/${TARGET_BRANCH}"
+
+          echo "Repositório sincronizado com origin/${TARGET_BRANCH}."
+          git log -1 --oneline
 
       - name: Consultar Azure DevOps e gerar Excel
+        shell: bash
         env:
           AZDO_PAT: ${{ secrets.AZDO_PAT }}
-        run: python generate_lista.py
-
-      - name: Validar existência do arquivo
         run: |
-          test -f "${OUTPUT_FILE}"
+          set -euo pipefail
+
+          if [ -z "${AZDO_PAT:-}" ]; then
+            echo "O Secret AZDO_PAT não está configurado."
+            exit 1
+          fi
+
+          if [ ! -f "generate_lista.py" ]; then
+            echo "O arquivo generate_lista.py não foi encontrado na raiz."
+            exit 1
+          fi
+
+          python generate_lista.py
+
+      - name: Validar arquivo gerado
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "${OUTPUT_FILE}" ]; then
+            echo "O arquivo ${OUTPUT_FILE} não foi criado."
+            exit 1
+          fi
+
+          if [ ! -s "${OUTPUT_FILE}" ]; then
+            echo "O arquivo ${OUTPUT_FILE} foi criado, mas está vazio."
+            exit 1
+          fi
+
+          python <<'PY'
+          from pathlib import Path
+          from openpyxl import load_workbook
+
+          file_path = Path("LISTA.xlsx")
+
+          expected_headers = [
+              "ID",
+              "Title 1",
+              "Title 2",
+              "Title 3",
+              "Title 4",
+              "Title 5",
+              "State",
+              "Priority",
+              "ExternalTicketIDs",
+              "Effort",
+              "Story Points",
+              "Assigned To",
+              "Work Item Type",
+              "Tags",
+              "Area Path",
+              "Iteration Path",
+              "Parent",
+          ]
+
+          workbook = load_workbook(
+              file_path,
+              read_only=True,
+              data_only=True,
+          )
+
+          worksheet = workbook.active
+
+          actual_headers = [
+              worksheet.cell(row=1, column=column).value
+              for column in range(
+                  1,
+                  len(expected_headers) + 1,
+              )
+          ]
+
+          if actual_headers != expected_headers:
+              print("Cabeçalhos esperados:")
+              print(expected_headers)
+              print()
+              print("Cabeçalhos encontrados:")
+              print(actual_headers)
+
+              workbook.close()
+
+              raise SystemExit(
+                  "Os cabeçalhos do Excel não correspondem "
+                  "à estrutura esperada."
+              )
+
+          data_rows = worksheet.max_row - 1
+          column_count = worksheet.max_column
+
+          if data_rows <= 0:
+              workbook.close()
+
+              raise SystemExit(
+                  "O arquivo foi gerado sem linhas de dados."
+              )
+
+          if column_count != len(expected_headers):
+              workbook.close()
+
+              raise SystemExit(
+                  f"Quantidade inesperada de colunas: "
+                  f"{column_count}."
+              )
+
+          print("Arquivo validado com sucesso.")
+          print(f"Planilha: {worksheet.title}")
+          print(f"Linhas de dados: {data_rows}")
+          print(f"Colunas: {column_count}")
+          print(f"Tamanho do arquivo: {file_path.stat().st_size} bytes")
+
+          workbook.close()
+          PY
+
           ls -lh "${OUTPUT_FILE}"
 
-      - name: Publicar Excel como artefato
+      - name: Verificar se o Excel foi alterado
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git add "${OUTPUT_FILE}"
+
+          if git diff --cached --quiet; then
+            echo "Nenhuma alteração encontrada em ${OUTPUT_FILE}."
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "Alterações encontradas em ${OUTPUT_FILE}."
+            echo "changed=true" >> "${GITHUB_OUTPUT}"
+
+            echo "Resumo das alterações:"
+            git diff --cached --stat
+          fi
+
+      - name: Configurar identidade do GitHub Actions
+        if: steps.changes.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Publicar novo Excel no repositório
+        if: steps.changes.outputs.changed == 'true'
+        shell: bash
+        env:
+          AZDO_PAT: ${{ secrets.AZDO_PAT }}
+        run: |
+          set -euo pipefail
+
+          publish_succeeded=false
+
+          for attempt in 1 2 3; do
+            echo "Tentativa de publicação ${attempt} de 3."
+
+            git add "${OUTPUT_FILE}"
+
+            if git diff --cached --quiet; then
+              echo "Nenhuma alteração pendente após a sincronização."
+              publish_succeeded=true
+              break
+            fi
+
+            git commit \
+              -m "Atualizar LISTA.xlsx pelo Azure DevOps"
+
+            if git push origin "HEAD:${TARGET_BRANCH}"; then
+              echo "LISTA.xlsx publicado com sucesso."
+              publish_succeeded=true
+              break
+            fi
+
+            echo "O repositório remoto recebeu alterações."
+            echo "Sincronizando e gerando novamente o Excel..."
+
+            git fetch origin "${TARGET_BRANCH}"
+            git reset --hard "origin/${TARGET_BRANCH}"
+
+            python generate_lista.py
+
+            if [ ! -f "${OUTPUT_FILE}" ]; then
+              echo "O arquivo não foi recriado após a sincronização."
+              exit 1
+            fi
+          done
+
+          if [ "${publish_succeeded}" != "true" ]; then
+            echo "Não foi possível publicar o arquivo após 3 tentativas."
+            exit 1
+          fi
+
+      - name: Resultado sem alterações
+        if: steps.changes.outputs.changed == 'false'
+        shell: bash
+        run: |
+          echo "A query foi executada corretamente."
+          echo "O conteúdo gerado é equivalente ao arquivo atual."
+          echo "Nenhum novo commit foi necessário."
+
+      - name: Publicar cópia do Excel como artefato
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lista-candidate
-          path: LISTA-CANDIDATE.xlsx
-          if-no-files-found: error
+          name: lista-xlsx-${{ github.run_number }}
+          path: LISTA.xlsx
+          if-no-files-found: warn
           retention-days: 7
+
+      - name: Resumo da execução
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Atualização do LISTA.xlsx"
+            echo
+            echo "- Query: Wonder Squad - Epics"
+            echo "- Query ID: ${AZDO_QUERY_ID}"
+            echo "- Arquivo: ${OUTPUT_FILE}"
+            echo "- Branch: ${TARGET_BRANCH}"
+            echo "- Execução manual: ${{ github.run_number }}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ -f "${OUTPUT_FILE}" ]; then
+            echo "- Arquivo gerado: sim" \
+              >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "- Arquivo gerado: não" \
+              >> "${GITHUB_STEP_SUMMARY}"
+          fi
