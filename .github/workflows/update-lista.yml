@@ -144,8 +144,37 @@ jobs:
           git config user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git commit -m "Atualizar LISTA.xlsx pelo Azure DevOps"
-          git push
+          git add LISTA.xlsx
+
+          git commit -m "Atualizar LISTA.xlsx pelo Azure DevOps" || true
+
+          for attempt in 1 2 3; do
+
+            echo "Tentativa ${attempt} de publicação..."
+
+            if git push origin main; then
+              echo "Publicação realizada com sucesso."
+              exit 0
+            fi
+
+            echo "Branch desatualizada. Sincronizando..."
+
+            git fetch origin main
+
+            git reset --hard origin/main
+
+            python generate_lista.py
+
+            git add LISTA.xlsx
+
+            git commit -m \
+              "Atualizar LISTA.xlsx pelo Azure DevOps" \
+              || true
+
+          done
+
+          echo "Não foi possível publicar após 3 tentativas."
+          exit 1
 
       - name: Resultado sem alterações
         if: steps.changes.outputs.changed == 'false'
