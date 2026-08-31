@@ -55,7 +55,7 @@ function openTicket(ticket){const items=ticketDetails[ticket]||[];ticketModalTit
 function closeTicket(){ticketModal.classList.remove('open');document.body.style.overflow=''}
 grid.addEventListener('click',event=>{const button=event.target.closest('.ticket-button');if(button)openTicket(button.dataset.ticket)});ticketModalClose.addEventListener('click',closeTicket);ticketModal.addEventListener('click',event=>{if(event.target===ticketModal)closeTicket()});document.addEventListener('keydown',event=>{if(event.key==='Escape'&&ticketModal.classList.contains('open'))closeTicket()});
 
-const workbookShareUrl='https://cyncly.sharepoint.com/:x:/r/sites/PromobIntranet/criacaodeconteudo/Criao%20de%20Contedo/Arquivos%20Internos/Content%20Releases/LISTA.xlsx?d=w25ac4a28676d43f5a335dea0ae0cb2b3&csf=1&web=1&e=DCVANt';
+const workbookShareUrl = './LISTA.xlsx';
 function extractTicketIds(value){return [...String(value||'').matchAll(/\d+/g)].map(m=>m[0])}
 function normalizedTags(value){return String(value||'').split(/[;,]/).map(v=>v.trim().toLowerCase()).filter(Boolean)}
 function findHeader(row,names){const keys=Object.keys(row);return keys.find(k=>names.includes(String(k).trim().toLowerCase()))}
