@@ -19,7 +19,7 @@ jobs:
             --show-error \
             --user ":${AZDO_PAT}" \
             --header "Accept: application/json" \
-            "https://dev.azure.com/promob-dev/Promob/_apis/wit/queries?\$depth=3&api-version=7.1" \
+            "https://dev.azure.com/promob-dev/Promob/_apis/wit/queries?\$depth=2&api-version=7.1" \
             > queries.json
 
           python << 'PY'
