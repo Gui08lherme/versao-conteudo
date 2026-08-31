@@ -16,4 +16,143 @@ jobs:
 
     env:
       AZDO_ORGANIZATION: promob-dev
-      AZDO
+      AZDO_PROJECT: Promob
+      AZDO_QUERY_ID: 133e1671-7720-4c9b-ae84-e96eedeb96ee
+      OUTPUT_FILE: LISTA.xlsx
+
+    steps:
+      - name: Baixar conteúdo do repositório
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests openpyxl
+
+      - name: Consultar Azure DevOps e gerar Excel
+        env:
+          AZDO_PAT: ${{ secrets.AZDO_PAT }}
+        run: python generate_lista.py
+
+      - name: Validar arquivo gerado
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "${OUTPUT_FILE}" ]; then
+            echo "O arquivo ${OUTPUT_FILE} não foi criado."
+            exit 1
+          fi
+
+          python <<'PY'
+          from openpyxl import load_workbook
+
+          file_name = "LISTA.xlsx"
+
+          workbook = load_workbook(
+              file_name,
+              read_only=True,
+              data_only=True
+          )
+
+          worksheet = workbook.active
+
+          expected_headers = [
+              "ID",
+              "Title 1",
+              "Title 2",
+              "Title 3",
+              "Title 4",
+              "Title 5",
+              "State",
+              "Priority",
+              "ExternalTicketIDs",
+              "Effort",
+              "Story Points",
+              "Assigned To",
+              "Work Item Type",
+              "Tags",
+              "Area Path",
+              "Iteration Path",
+              "Parent"
+          ]
+
+          actual_headers = [
+              worksheet.cell(row=1, column=column).value
+              for column in range(1, len(expected_headers) + 1)
+          ]
+
+          if actual_headers != expected_headers:
+              print("Cabeçalhos encontrados:")
+              print(actual_headers)
+
+              raise SystemExit(
+                  "Os cabeçalhos do arquivo não correspondem "
+                  "ao formato esperado."
+              )
+
+          data_rows = worksheet.max_row - 1
+
+          if data_rows <= 0:
+              raise SystemExit(
+                  "O arquivo foi gerado sem linhas de dados."
+              )
+
+          print("Arquivo validado com sucesso.")
+          print(f"Planilha: {worksheet.title}")
+          print(f"Linhas de dados: {data_rows}")
+          print(f"Colunas: {worksheet.max_column}")
+
+          workbook.close()
+          PY
+
+          ls -lh "${OUTPUT_FILE}"
+
+      - name: Verificar alterações
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git add "${OUTPUT_FILE}"
+
+          if git diff --cached --quiet; then
+            echo "Nenhuma alteração encontrada no arquivo."
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "O arquivo possui alterações."
+            echo "changed=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Publicar novo Excel no repositório
+        if: steps.changes.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git commit -m "Atualizar LISTA.xlsx pelo Azure DevOps"
+          git push
+
+      - name: Resultado sem alterações
+        if: steps.changes.outputs.changed == 'false'
+        run: |
+          echo "O Azure DevOps não produziu alterações no LISTA.xlsx."
+
+      - name: Publicar cópia como artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: lista-xlsx
+          path: LISTA.xlsx
+          if-no-files-found: error
+          retention-days: 7
